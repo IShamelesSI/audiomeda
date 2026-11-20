@@ -30,6 +30,13 @@ pub enum Request {
     RemoveOutput { id: String },
     AddMic { id: String },
     RemoveMic { id: String },
+    /// Mutes all mics, or unmutes them all if they're all muted already.
+    ToggleMics,
+    SavePreset { name: String },
+    LoadPreset { name: String },
+    DeletePreset { name: String },
+    /// `action` is "toggle_mics" or "preset:<name>"; `None` removes the hotkey.
+    SetHotkey { combo: String, action: Option<String> },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

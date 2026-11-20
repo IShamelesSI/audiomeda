@@ -30,12 +30,17 @@ audiomeda mute discord on
 audiomeda mic add "Microphone (HyperX"
 audiomeda output add "CABLE-A Input"  virtual mic for Discord
 audiomeda vol "mic Microphone" "CABLE-A Input" 100
+audiomeda preset save Gaming          snapshot the current mix
+audiomeda hotkey ctrl+alt+1 preset:Gaming
+audiomeda hotkey ctrl+alt+m toggle_mics
 ```
 Run `audiomeda` with no arguments for the full list.
 
-Stop with **Ctrl+C**, which gives apps their normal output back. If the engine
-was killed instead, run `target\release\audiomeda-engine.exe reset`, or apps
-stay silent.
+The engine has no window, only a tray icon (look under the ^ next to the
+clock). Its menu loads presets, mutes mics, turns on **Start with Windows**,
+and **Quit**s, which gives apps their normal output back. If the engine was
+killed instead, run `target\release\audiomeda-engine.exe reset`, or apps stay
+silent.
 
 ## Test
 ```

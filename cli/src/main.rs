@@ -12,7 +12,11 @@ const USAGE: &str = "usage:
   audiomeda default <output> <percent>          route for newly seen apps
   audiomeda reset <input>                       back to the default route
   audiomeda output add|remove <device>
-  audiomeda mic add|remove <device>";
+  audiomeda mic add|remove <device>
+  audiomeda mics toggle                         mute/unmute all mics
+  audiomeda preset save|load|delete <name>
+  audiomeda hotkey <combo> toggle_mics|preset:<name>|none
+                                                e.g. hotkey ctrl+alt+m toggle_mics";
 
 fn main() {
     if let Err(e) = run() {
@@ -66,6 +70,14 @@ fn run() -> Result<(), String> {
             let key = input(&snap, inp)?;
             Request::RemoveMic { id: key.strip_prefix("mic:").ok_or("that input isn't a mic")?.to_string() }
         }
+        ["mics", "toggle"] => Request::ToggleMics,
+        ["preset", "save", name] => Request::SavePreset { name: name.to_string() },
+        ["preset", "load", name] => Request::LoadPreset { name: name.to_string() },
+        ["preset", "delete", name] => Request::DeletePreset { name: name.to_string() },
+        ["hotkey", combo, action] => Request::SetHotkey {
+            combo: combo.to_string(),
+            action: (*action != "none").then(|| action.to_string()),
+        },
         _ => return Err(USAGE.into()),
     };
     match call(&mut client, &req)? {
@@ -165,6 +177,11 @@ fn status(snap: &Snapshot) {
         .map(|(id, c)| format!("{} {}", s.outputs.get(id).map_or(id.as_str(), |o| &o.name), pct(c.volume)))
         .collect();
     println!("NEW APPS -> {}", def.join(", "));
+    let presets: Vec<&str> = s.presets.keys().map(String::as_str).collect();
+    println!("PRESETS: {}", if presets.is_empty() { "(none)".into() } else { presets.join(", ") });
+    for (combo, action) in &s.hotkeys {
+        println!("HOTKEY {combo} -> {action}");
+    }
 }
 
 fn devices(snap: &Snapshot) {

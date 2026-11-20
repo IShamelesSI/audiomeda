@@ -112,20 +112,50 @@ The throwaway spike CLI is deleted; its working code lives on in `engine/`.
 - No push notifications or meter stream yet; the UI step adds those (clients
   poll `snapshot` until then).
 
+## Tray, presets, hotkeys (built 2026-11-20)
+- The engine is a windowless app (`windows_subsystem = "windows"`). Its
+  logs still print when run from a terminal (it attaches to the parent
+  console) or with output redirected.
+- `tray.rs`: one thread owns a hidden window that receives tray clicks,
+  hotkeys and a 250 ms timer. The tray menu has load preset, mute mics (a
+  checkmark shows the state), Start with Windows, and Quit. Quit stops
+  gracefully, returning apps to their normal output.
+- Tray actions and hotkeys go through the same request handler as the
+  pipe, so the validation and saving are shared.
+- **Presets** (`state.presets`): a snapshot of outputs, input rows and the
+  default route. Loading one replaces outputs and the default route and
+  overwrites the rows it has; apps it doesn't know keep their row.
+- **Hotkeys** (`state.hotkeys`: combo → `toggle_mics` | `preset:<name>`).
+  A modifier is required. They're re-registered when the list changes; a
+  combo taken by another app shows a toast. Deleting a preset removes its
+  hotkeys.
+- Toasts (tray balloon notifications) appear on hotkey actions and errors.
+- Start with Windows = per-user `HKCU\...\Run` value "Audiomeda" pointing
+  at the exe. Off by default; toggled from the tray.
+- Icons: `assets/source/` holds the originals (app image, pink tray image).
+  `assets/make_icons.py` turns them into `app.ico` / `tray.ico` (cleans
+  faint alpha noise, crops square, multi-size) plus 256 px previews.
+  `engine/build.rs` embeds both (app = exe icon, tray = resource 2) and a
+  per-monitor DPI-aware manifest so the tray icon stays sharp.
+- Not in yet: "Open mixer" (no UI yet), log file for when it starts at
+  login.
+
 ## Repo layout
 Rust workspace:
 - `protocol/`: messages + mixer state and its pure logic (`apply`, `gain`),
   shared by engine, CLI and later the UI. No Windows code.
 - `engine/`: `main.rs` manager loop, `audio.rs` capture/render threads,
-  `pipe.rs` named-pipe server, `state.rs` load/save, `win.rs` Windows plumbing.
+  `pipe.rs` named-pipe server, `tray.rs` tray/hotkeys/toasts/autostart,
+  `state.rs` load/save, `win.rs` Windows plumbing.
 - `cli/`: `audiomeda` command-line remote.
+- `assets/`: app and tray icons, their sources, and the script that builds them.
 - Later: `ui/` (Tauri + Svelte).
 
 ## Build order
 1. ✅ Spike: all 4 risky questions answered (results above).
 2. ✅ Engine core: headless matrix mixer, JSON state, hot-plug.
 3. ✅ Named pipe API + tiny CLI client.
-4. Tray, presets, hotkeys (usable daily without UI).
+4. ✅ Tray, presets, hotkeys (usable daily without UI).
 5. Tauri + Svelte UI: stores/API, tokens, playground, cards view.
 6. Matrix view, mic noise gate.
 7. Later features.

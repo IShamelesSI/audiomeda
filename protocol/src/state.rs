@@ -15,6 +15,20 @@ pub struct State {
     pub inputs: BTreeMap<String, Row>,
     /// Cells a newly seen app starts with.
     pub default_route: BTreeMap<String, Cell>,
+    #[serde(default)]
+    pub presets: BTreeMap<String, Preset>,
+    /// Canonical combo ("ctrl+alt+m") -> action ("toggle_mics" or "preset:<name>").
+    #[serde(default)]
+    pub hotkeys: BTreeMap<String, String>,
+}
+
+/// A saved mix. Loading it replaces outputs and the default route, and overwrites the
+/// rows it has; apps it doesn't know keep their current row.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Preset {
+    pub outputs: BTreeMap<String, Column>,
+    pub inputs: BTreeMap<String, Row>,
+    pub default_route: BTreeMap<String, Cell>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -56,6 +70,38 @@ fn unknown(what: &str, key: &str) -> String {
     format!("unknown {what}: {key}")
 }
 
+/// Parses a global hotkey like "Ctrl+Alt+M" into (Win32 MOD_* flags, virtual-key code,
+/// canonical text). Needs a modifier so it can't swallow normal typing.
+pub fn parse_hotkey(s: &str) -> Result<(u32, u32, String), String> {
+    const MODS: [(&str, u32); 4] = [("ctrl", 2), ("alt", 1), ("shift", 4), ("win", 8)];
+    let (mut mods, mut key) = (0, None);
+    for part in s.to_lowercase().split('+').map(str::trim) {
+        let part = if part == "control" { "ctrl" } else { part };
+        if let Some((_, m)) = MODS.iter().find(|(n, _)| *n == part) {
+            mods |= m;
+        } else if key.is_some() {
+            return Err(format!("{s:?} has more than one key"));
+        } else {
+            let vk = match part.as_bytes() {
+                [c @ (b'a'..=b'z' | b'0'..=b'9')] => c.to_ascii_uppercase() as u32,
+                _ if part == "space" => 0x20,
+                _ => match part.strip_prefix('f').and_then(|n| n.parse::<u32>().ok()) {
+                    Some(n @ 1..=24) => 0x6F + n,
+                    _ => return Err(format!("unknown key {part:?} (use a-z, 0-9, f1-f24 or space)")),
+                },
+            };
+            key = Some((vk, part.to_string()));
+        }
+    }
+    let (vk, name) = key.ok_or_else(|| format!("{s:?} has no key"))?;
+    if mods == 0 {
+        return Err(format!("{s:?} needs ctrl, alt, shift or win"));
+    }
+    let mut parts: Vec<&str> = MODS.iter().filter(|(_, m)| mods & m != 0).map(|(n, _)| *n).collect();
+    parts.push(&name);
+    Ok((mods, vk, parts.join("+")))
+}
+
 impl State {
     /// First run: primary output at 100%, nothing else.
     pub fn new(sink: String, primary_id: String, primary_name: String) -> Self {
@@ -74,6 +120,16 @@ impl State {
             Some(c) if c.on && !row.mute && !col.mute => row.volume * c.volume * col.volume,
             _ => 0.0,
         }
+    }
+
+    fn mics_mut(&mut self) -> impl Iterator<Item = &mut Row> {
+        self.inputs.iter_mut().filter(|(k, _)| k.starts_with("mic:")).map(|(_, r)| r)
+    }
+
+    /// True if there are mics and all of them are muted.
+    pub fn mics_muted(&self) -> bool {
+        let mut mics = self.inputs.iter().filter(|(k, _)| k.starts_with("mic:")).peekable();
+        mics.peek().is_some() && mics.all(|(_, r)| r.mute)
     }
 
     fn new_app_row(&self) -> Row {
@@ -163,6 +219,52 @@ impl State {
             Request::RemoveMic { id } => {
                 self.inputs.remove(&mic_key(id)).ok_or_else(|| unknown("mic", id))?;
             }
+            Request::ToggleMics => {
+                if self.mics_mut().next().is_none() {
+                    return Err("there are no mics".into());
+                }
+                let mute = !self.mics_muted();
+                self.mics_mut().for_each(|r| r.mute = mute);
+            }
+            Request::SavePreset { name } => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err("preset name is empty".into());
+                }
+                let p = Preset {
+                    outputs: self.outputs.clone(),
+                    inputs: self.inputs.clone(),
+                    default_route: self.default_route.clone(),
+                };
+                self.presets.insert(name.to_string(), p);
+            }
+            Request::LoadPreset { name } => {
+                let p = self.presets.get(name).cloned().ok_or_else(|| unknown("preset", name))?;
+                self.outputs = p.outputs;
+                self.default_route = p.default_route;
+                self.inputs.extend(p.inputs);
+            }
+            Request::DeletePreset { name } => {
+                self.presets.remove(name).ok_or_else(|| unknown("preset", name))?;
+                let action = format!("preset:{name}");
+                self.hotkeys.retain(|_, a| *a != action);
+            }
+            Request::SetHotkey { combo, action } => {
+                let (_, _, combo) = parse_hotkey(combo)?;
+                match action.as_deref() {
+                    None => {
+                        self.hotkeys.remove(&combo).ok_or_else(|| unknown("hotkey", &combo))?;
+                    }
+                    Some(a) => {
+                        let ok = a == "toggle_mics"
+                            || a.strip_prefix("preset:").is_some_and(|p| self.presets.contains_key(p));
+                        if !ok {
+                            return Err(format!("unknown action {a:?} (use toggle_mics or preset:<saved preset>)"));
+                        }
+                        self.hotkeys.insert(combo, a.to_string());
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -232,6 +334,52 @@ mod tests {
         assert_eq!(s.inputs["app:a.exe"].volume, 1.0); // None left unchanged
         s.apply(&Request::ResetInput { key: "app:a.exe".into() }, &none, &none).unwrap();
         assert_eq!(s.inputs["app:a.exe"], s.new_app_row());
+    }
+
+    #[test]
+    fn hotkey_parsing() {
+        assert_eq!(parse_hotkey("Alt+Ctrl+M").unwrap(), (3, 0x4D, "ctrl+alt+m".into()));
+        assert_eq!(parse_hotkey("win+shift+F12").unwrap(), (12, 0x7B, "shift+win+f12".into()));
+        assert_eq!(parse_hotkey("ctrl+1").unwrap().1, 0x31);
+        assert!(parse_hotkey("m").is_err(), "needs a modifier");
+        assert!(parse_hotkey("ctrl+a+b").is_err());
+        assert!(parse_hotkey("ctrl+f25").is_err());
+        assert!(parse_hotkey("ctrl+").is_err());
+    }
+
+    #[test]
+    fn presets_mics_and_hotkeys() {
+        let mut s = sample();
+        let none = Devices::new();
+        s.ensure_app("a.exe");
+        s.apply(&Request::AddMic { id: "m".into() }, &none, &devs(&["m"])).unwrap();
+        s.apply(&Request::SavePreset { name: "quiet".into() }, &none, &none).unwrap();
+
+        // change things, then load: rows in the preset come back, outputs replaced, new apps kept
+        s.inputs.get_mut("app:a.exe").unwrap().volume = 0.2;
+        s.outputs.remove("vr");
+        s.ensure_app("new.exe");
+        s.apply(&Request::LoadPreset { name: "quiet".into() }, &none, &none).unwrap();
+        assert_eq!(s.inputs["app:a.exe"].volume, 1.0);
+        assert!(s.outputs.contains_key("vr"));
+        assert!(s.inputs.contains_key("app:new.exe"));
+
+        assert!(!s.mics_muted());
+        s.apply(&Request::ToggleMics, &none, &none).unwrap();
+        assert!(s.mics_muted());
+        s.apply(&Request::ToggleMics, &none, &none).unwrap();
+        assert!(!s.mics_muted());
+
+        let hk = |c: &str, a: Option<&str>| Request::SetHotkey { combo: c.into(), action: a.map(Into::into) };
+        s.apply(&hk("Ctrl+Alt+1", Some("preset:quiet")), &none, &none).unwrap();
+        assert_eq!(s.hotkeys["ctrl+alt+1"], "preset:quiet");
+        assert!(s.apply(&hk("ctrl+alt+2", Some("preset:nope")), &none, &none).is_err());
+        assert!(s.apply(&hk("ctrl+alt+2", Some("explode")), &none, &none).is_err());
+        s.apply(&Request::DeletePreset { name: "quiet".into() }, &none, &none).unwrap();
+        assert!(s.hotkeys.is_empty(), "hotkeys for a deleted preset go too");
+
+        let mut empty = sample();
+        assert!(empty.apply(&Request::ToggleMics, &none, &none).is_err());
     }
 
     #[test]

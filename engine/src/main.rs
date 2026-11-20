@@ -1,9 +1,12 @@
 //! Audiomeda engine: headless matrix mixer. Owns the state, captures every app that
 //! plays sound (routing its original output to the silent sink) and mixes it to each output.
+// no console window when started at login; logs still reach a terminal or redirect (see main)
+#![windows_subsystem = "windows"]
 
 mod audio;
 mod pipe;
 mod state;
+mod tray;
 mod win;
 
 use std::collections::{HashMap, HashSet};
@@ -14,11 +17,12 @@ use std::time::Duration;
 use audio::{Conns, Source, Worker};
 use audiomeda_protocol::{PIPE, Request, Response, Snapshot, State, app_key};
 use wasapi::{Direction, initialize_mta};
-use windows::Win32::System::Console::SetConsoleCtrlHandler;
+use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE, SetConsoleCtrlHandler};
 use windows_core::BOOL;
 use win::Res;
 
-static STOP: AtomicBool = AtomicBool::new(false);
+/// Set by Ctrl+C or the tray's Quit; the main loop then un-routes apps and exits.
+pub(crate) static STOP: AtomicBool = AtomicBool::new(false);
 static DONE: AtomicBool = AtomicBool::new(false);
 /// Set when the state changed and should be saved.
 static DIRTY: AtomicBool = AtomicBool::new(false);
@@ -36,6 +40,12 @@ unsafe extern "system" fn on_ctrl(_: u32) -> BOOL {
 }
 
 fn main() {
+    // started from a terminal with no redirect: print there (a GUI-subsystem exe has no console)
+    unsafe {
+        if GetStdHandle(STD_OUTPUT_HANDLE).map_or(true, |h| h.is_invalid() || h.0.is_null()) {
+            let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
     if let Err(e) = run() {
         eprintln!("error: {e}");
         std::process::exit(1);
@@ -86,10 +96,10 @@ fn run() -> Res<()> {
     let state = Arc::new(Mutex::new(state));
     // what clients see besides the state; refreshed every tick
     let live: Arc<Mutex<Snapshot>> = Default::default();
-    {
+    let handler: tray::Handler = {
         let (state, live) = (state.clone(), live.clone());
         // never hold the state and live locks at the same time
-        pipe::serve(PIPE, move |req| match req {
+        Arc::new(move |req| match req {
             Request::Snapshot => {
                 let s = state.lock().unwrap().clone();
                 Response::Snapshot(Snapshot { state: s, ..live.lock().unwrap().clone() })
@@ -107,9 +117,12 @@ fn run() -> Res<()> {
                     Err(message) => Response::Error { message },
                 }
             }
-        })?;
-    }
+        })
+    };
+    let h = handler.clone();
+    pipe::serve(PIPE, move |req| h(req))?;
     println!("listening on {PIPE}");
+    let tray = tray::spawn(handler, state.clone());
     let conns: Conns = Default::default();
     let own_pid = std::process::id();
 
@@ -246,6 +259,7 @@ fn run() -> Res<()> {
     let s = state.lock().unwrap().clone();
     state::save(&s, &path)?;
     println!("stopped, {} app(s) returned to their normal output", apps.len());
+    let _ = tray.join(); // removes the tray icon
     DONE.store(true, Ordering::Relaxed);
     Ok(())
 }
