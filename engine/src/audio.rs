@@ -8,7 +8,7 @@ use std::thread::JoinHandle;
 
 use wasapi::{AudioClient, DeviceEnumerator, Direction, SampleType, StreamMode, WaveFormat, initialize_mta};
 
-use crate::state::State;
+use audiomeda_protocol::State;
 use crate::win::Res;
 
 pub const RATE: usize = 48_000;

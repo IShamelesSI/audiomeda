@@ -2,6 +2,7 @@
 //! plays sound (routing its original output to the silent sink) and mixes it to each output.
 
 mod audio;
+mod pipe;
 mod state;
 mod win;
 
@@ -11,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use audio::{Conns, Source, Worker};
-use state::{State, app_key};
+use audiomeda_protocol::{PIPE, Request, Response, Snapshot, State, app_key};
 use wasapi::{Direction, initialize_mta};
 use windows::Win32::System::Console::SetConsoleCtrlHandler;
 use windows_core::BOOL;
@@ -19,6 +20,8 @@ use win::Res;
 
 static STOP: AtomicBool = AtomicBool::new(false);
 static DONE: AtomicBool = AtomicBool::new(false);
+/// Set when the state changed and should be saved.
+static DIRTY: AtomicBool = AtomicBool::new(false);
 
 /// Ctrl+C / closing the console: let the main loop un-route apps before the process dies.
 unsafe extern "system" fn on_ctrl(_: u32) -> BOOL {
@@ -58,12 +61,12 @@ fn run() -> Res<()> {
     initialize_mta().ok()?;
     unsafe { SetConsoleCtrlHandler(Some(on_ctrl), true)? };
 
-    let path = State::path();
-    let state = match State::load(&path)? {
+    let path = state::path();
+    let state = match state::load(&path)? {
         Some(s) => s,
         None => {
             let s = first_run_state()?;
-            s.save(&path)?;
+            state::save(&s, &path)?;
             s
         }
     };
@@ -81,9 +84,32 @@ fn run() -> Res<()> {
     }
     let sink = state.sink.clone();
     let state = Arc::new(Mutex::new(state));
-    // shortcut: hand edits to state.json are picked up by polling its mtime; the named pipe replaces this
-    let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    let mut seen = mtime(&path);
+    // what clients see besides the state; refreshed every tick
+    let live: Arc<Mutex<Snapshot>> = Default::default();
+    {
+        let (state, live) = (state.clone(), live.clone());
+        // never hold the state and live locks at the same time
+        pipe::serve(PIPE, move |req| match req {
+            Request::Snapshot => {
+                let s = state.lock().unwrap().clone();
+                Response::Snapshot(Snapshot { state: s, ..live.lock().unwrap().clone() })
+            }
+            req => {
+                let (renders, captures) = {
+                    let l = live.lock().unwrap();
+                    (l.renders.clone(), l.captures.clone())
+                };
+                match state.lock().unwrap().apply(&req, &renders, &captures) {
+                    Ok(()) => {
+                        DIRTY.store(true, Ordering::Relaxed);
+                        Response::Ok
+                    }
+                    Err(message) => Response::Error { message },
+                }
+            }
+        })?;
+    }
+    println!("listening on {PIPE}");
     let conns: Conns = Default::default();
     let own_pid = std::process::id();
 
@@ -94,24 +120,9 @@ fn run() -> Res<()> {
     // shortcut: polls every 500 ms instead of device/session notifications; switch if the
     // half-second delay before a new app is heard ever matters.
     while !STOP.load(Ordering::Relaxed) {
-        if mtime(&path) != seen {
-            seen = mtime(&path);
-            match State::load(&path) {
-                Ok(Some(s)) => {
-                    if s.sink != sink {
-                        println!("sink changed in state.json: restart the engine to apply it");
-                    }
-                    *state.lock().unwrap() = s;
-                    println!("reloaded state.json");
-                }
-                Ok(None) => {}
-                Err(e) => println!("state.json not reloaded, keeping current settings: {e}"),
-            }
-        }
         let procs = win::processes()?;
         let renders = win::devices(Direction::Render)?;
         let captures = win::devices(Direction::Capture)?;
-        let mut dirty = false;
 
         // apps playing anywhere but the sink are new or escaped (e.g. restarted): route + manage
         let by_pid = win::exe_by_pid(&procs);
@@ -121,7 +132,9 @@ fn run() -> Res<()> {
             .filter_map(|pid| by_pid.get(&pid).map(|e| e.to_string()))
             .collect();
         for exe in &playing {
-            dirty |= state.lock().unwrap().ensure_app(exe);
+            if state.lock().unwrap().ensure_app(exe) {
+                DIRTY.store(true, Ordering::Relaxed);
+            }
             // re-sent every tick until the app actually moves (some only move when playback restarts)
             let r = win::route(&procs, exe, Some(&sink));
             if !apps.contains_key(exe) {
@@ -170,7 +183,7 @@ fn run() -> Res<()> {
         // mics: rows "mic:<capture id>" whose device is present
         let mic_keys: Vec<String> =
             state.lock().unwrap().inputs.keys().filter(|k| k.starts_with("mic:")).cloned().collect();
-        mics.retain(|k, _| captures.contains_key(&k[4..]));
+        mics.retain(|k, _| captures.contains_key(&k[4..]) && mic_keys.contains(k));
         for key in mic_keys {
             let id = key[4..].to_string();
             if !captures.contains_key(&id) || mics.get(&key).is_some_and(Worker::alive) {
@@ -188,7 +201,7 @@ fn run() -> Res<()> {
             if !present {
                 println!("output disconnected: {id}");
             }
-            present
+            present && out_ids.contains(id)
         });
         for id in out_ids {
             if !renders.contains_key(&id) || outs.get(&id).is_some_and(Worker::alive) {
@@ -211,9 +224,16 @@ fn run() -> Res<()> {
             }
         }
 
-        if dirty {
-            state.lock().unwrap().save(&path)?;
-            seen = mtime(&path);
+        *live.lock().unwrap() = Snapshot {
+            state: State::default(), // filled in per request
+            active_outputs: outs.keys().cloned().collect(),
+            active_inputs: inputs,
+            renders,
+            captures,
+        };
+        if DIRTY.swap(false, Ordering::Relaxed) {
+            let s = state.lock().unwrap().clone();
+            state::save(&s, &path)?;
         }
         std::thread::sleep(Duration::from_millis(500));
     }
@@ -223,7 +243,8 @@ fn run() -> Res<()> {
     for exe in apps.keys() {
         let _ = win::route(&procs, exe, None);
     }
-    state.lock().unwrap().save(&path)?;
+    let s = state.lock().unwrap().clone();
+    state::save(&s, &path)?;
     println!("stopped, {} app(s) returned to their normal output", apps.len());
     DONE.store(true, Ordering::Relaxed);
     Ok(())

@@ -3,14 +3,30 @@
 version = 4
 
 [[package]]
+name = "audiomeda-cli"
+version = "0.1.0"
+dependencies = [
+ "audiomeda-protocol",
+]
+
+[[package]]
 name = "audiomeda-engine"
 version = "0.1.0"
 dependencies = [
+ "audiomeda-protocol",
  "serde",
  "serde_json",
  "wasapi",
  "windows",
  "windows-core",
+]
+
+[[package]]
+name = "audiomeda-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

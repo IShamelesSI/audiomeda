@@ -91,21 +91,40 @@ The throwaway spike CLI is deleted; its working code lives on in `engine/`.
   volumes count.
 - Ctrl+C returns apps to their normal output. After a crash or kill, run
   `audiomeda-engine reset`, or apps stay silent (routed to the sink).
-- Until the named pipe exists, hand edits to `state.json` are reloaded
-  live (polls the file's modified time). Changing the sink needs a restart.
+- Changes go through the named pipe (below). `state.json` is read only at
+  startup, so hand edits need the engine stopped (e.g. to change the sink).
 - Known shortcuts (marked `shortcut:` in code): polling instead of
   notifications, one lock for all queues, drift fixed by trimming queues,
   ~22 ms shared-mode output buffer (IAudioClient3 low latency still to do).
 
+## Named pipe API (built 2026-11-20)
+- `\\.\pipe\audiomeda`, newline-delimited JSON, one response per request.
+  Message types are in `protocol/` (`Request`, `Response`, `Snapshot`).
+- `snapshot` returns the state, the devices present, and which inputs and
+  outputs are live. Everything else is a change (set input, output, cell or
+  default cell, reset input, add/remove output or mic). Changes are
+  validated (volume 0–1, known ids, sink can't be an output); a failed
+  request changes nothing. The engine saves after each change.
+- Security: local clients only (`PIPE_REJECT_REMOTE_CLIENTS`). The engine
+  claims the first pipe instance, so a second engine refuses to start.
+- Clients retry briefly when every pipe instance is busy (race between
+  accepting one client and listening for the next).
+- No push notifications or meter stream yet; the UI step adds those (clients
+  poll `snapshot` until then).
+
 ## Repo layout
-Rust workspace. Today: `engine/` (`main.rs` manager loop, `audio.rs`
-capture/render threads, `state.rs` mixer state + JSON, `win.rs` Windows
-plumbing). Later: `protocol/` (shared message types), `ui/` (Tauri + Svelte).
+Rust workspace:
+- `protocol/`: messages + mixer state and its pure logic (`apply`, `gain`),
+  shared by engine, CLI and later the UI. No Windows code.
+- `engine/`: `main.rs` manager loop, `audio.rs` capture/render threads,
+  `pipe.rs` named-pipe server, `state.rs` load/save, `win.rs` Windows plumbing.
+- `cli/`: `audiomeda` command-line remote.
+- Later: `ui/` (Tauri + Svelte).
 
 ## Build order
 1. ✅ Spike: all 4 risky questions answered (results above).
 2. ✅ Engine core: headless matrix mixer, JSON state, hot-plug.
-3. Named pipe API + tiny CLI client.
+3. ✅ Named pipe API + tiny CLI client.
 4. Tray, presets, hotkeys (usable daily without UI).
 5. Tauri + Svelte UI: stores/API, tokens, playground, cards view.
 6. Matrix view, mic noise gate.
