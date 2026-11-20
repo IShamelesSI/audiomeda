@@ -45,13 +45,21 @@ pub fn processes() -> Res<Vec<Proc>> {
     Ok(out)
 }
 
-/// Root of the exe's process tree (browsers are many processes; loopback must target the root).
+/// The pid whose process tree holds all of the exe's processes; loopback captures that tree.
+/// Usually the exe's topmost process (browsers). Some apps run as sibling trees under a
+/// launcher (League: six LeagueClientUxRender under LeagueClientUx), and the one making sound
+/// may be any of them; then the shared parent is used, but only if all its children are this
+/// exe, so no other app is captured with it.
 pub fn root_pid(procs: &[Proc], exe: &str) -> Option<u32> {
     let mine: Vec<&Proc> = procs.iter().filter(|p| p.exe == exe).collect();
-    mine.iter()
-        .find(|p| !mine.iter().any(|q| q.pid == p.parent))
-        .or(mine.first())
-        .map(|p| p.pid)
+    let roots: Vec<&Proc> = mine.iter().copied().filter(|p| !mine.iter().any(|q| q.pid == p.parent)).collect();
+    let first = roots.first().or(mine.first())?;
+    let parent = first.parent;
+    let siblings_only = roots.len() > 1
+        && roots.iter().all(|r| r.parent == parent)
+        && procs.iter().filter(|p| p.parent == parent).all(|p| p.exe == exe)
+        && procs.iter().any(|p| p.pid == parent);
+    Some(if siblings_only { parent } else { first.pid })
 }
 
 /// id -> friendly name of active devices.
@@ -228,5 +236,21 @@ mod tests {
         let procs = vec![p(5, 1, "explorer.exe"), p(20, 10, "msedge.exe"), p(10, 5, "msedge.exe"), p(30, 10, "msedge.exe")];
         assert_eq!(root_pid(&procs, "msedge.exe"), Some(10));
         assert_eq!(root_pid(&procs, "nope.exe"), None);
+    }
+
+    #[test]
+    fn sibling_trees_use_their_launcher_only_if_it_launches_nothing_else() {
+        let p = |pid, parent, exe: &str| Proc { pid, parent, exe: exe.into() };
+        let mut procs = vec![
+            p(5, 1, "explorer.exe"),
+            p(100, 5, "leagueclientux.exe"),
+            p(101, 100, "leagueclientuxrender.exe"),
+            p(102, 100, "leagueclientuxrender.exe"),
+            p(103, 102, "leagueclientuxrender.exe"),
+        ];
+        assert_eq!(root_pid(&procs, "leagueclientuxrender.exe"), Some(100));
+        // two separate instances started from explorer: never capture explorer's tree
+        procs.extend([p(200, 5, "notepad.exe"), p(201, 5, "notepad.exe")]);
+        assert_eq!(root_pid(&procs, "notepad.exe"), Some(200));
     }
 }
