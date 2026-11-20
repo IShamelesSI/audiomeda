@@ -1,7 +1,7 @@
 //! `audiomeda`: tiny command-line remote for the engine (until the UI exists).
 //! Inputs, outputs and devices match by id or by part of their name.
 
-use audiomeda_protocol::{Client, Request, Response, Snapshot, mic_key};
+use audiomeda_protocol::{Client, Request, Response, Snapshot, gain_from_position, mic_key, position_from_gain};
 
 const USAGE: &str = "usage:
   audiomeda status
@@ -37,8 +37,14 @@ fn run() -> Result<(), String> {
         other => return Err(format!("unexpected reply: {other:?}")),
     };
     let req = match args.as_slice() {
-        ["status"] => return Ok(status(&snap)),
-        ["devices"] => return Ok(devices(&snap)),
+        ["status"] => {
+            status(&snap);
+            return Ok(());
+        }
+        ["devices"] => {
+            devices(&snap);
+            return Ok(());
+        }
         ["vol", target, pct] => {
             let volume = Some(percent(pct)?);
             match input_or_output(&snap, target)? {
@@ -81,7 +87,10 @@ fn run() -> Result<(), String> {
         _ => return Err(USAGE.into()),
     };
     match call(&mut client, &req)? {
-        Response::Ok => Ok(println!("ok")),
+        Response::Ok => {
+            println!("ok");
+            Ok(())
+        }
         other => Err(format!("unexpected reply: {other:?}")),
     }
 }
@@ -95,14 +104,29 @@ fn call(client: &mut Client, req: &Request) -> Result<Response, String> {
 
 fn percent(s: &str) -> Result<f32, String> {
     let v: f32 = s.trim_end_matches('%').parse().map_err(|_| format!("not a percentage: {s}"))?;
-    Ok(v / 100.0)
+    // percentages are fader positions, like in the UI
+    Ok(gain_from_position(v / 100.0))
+}
+
+/// "Custom (original)" when the user renamed it, so either name matches in commands.
+fn with_label(snap: &Snapshot, key: &str, original: String) -> String {
+    match snap.state.labels.get(key).and_then(|l| l.name.as_deref()) {
+        Some(custom) => format!("{custom} ({original})"),
+        None => original,
+    }
 }
 
 fn input_name(snap: &Snapshot, key: &str) -> String {
-    match key.strip_prefix("mic:") {
+    let original = match key.strip_prefix("mic:") {
         Some(id) => format!("mic {}", snap.captures.get(id).map_or(id, String::as_str)),
         None => key.trim_start_matches("app:").to_string(),
-    }
+    };
+    with_label(snap, key, original)
+}
+
+fn output_name(snap: &Snapshot, id: &str) -> String {
+    let original = snap.state.outputs.get(id).map_or(id.to_string(), |o| o.name.clone());
+    with_label(snap, id, original)
 }
 
 fn input(snap: &Snapshot, q: &str) -> Result<String, String> {
@@ -110,7 +134,7 @@ fn input(snap: &Snapshot, q: &str) -> Result<String, String> {
 }
 
 fn output(snap: &Snapshot, q: &str) -> Result<String, String> {
-    pick("output", q, snap.state.outputs.iter().map(|(k, c)| (k.as_str(), c.name.clone())))
+    pick("output", q, snap.state.outputs.keys().map(|k| (k.as_str(), output_name(snap, k))))
 }
 
 /// For commands that accept either: try inputs, then outputs.
@@ -143,8 +167,8 @@ fn pick<'a>(what: &str, q: &str, candidates: impl Iterator<Item = (&'a str, Stri
     }
 }
 
-fn pct(v: f32) -> String {
-    format!("{:.0}%", v * 100.0)
+fn pct(gain: f32) -> String {
+    format!("{:.0}%", position_from_gain(gain) * 100.0)
 }
 
 fn status(snap: &Snapshot) {
@@ -156,7 +180,7 @@ fn status(snap: &Snapshot) {
     };
     println!("OUTPUTS");
     for (id, c) in &s.outputs {
-        println!("  {:<44} {:>5}  {}", c.name, pct(c.volume), flag(c.mute, snap.active_outputs.contains(id)));
+        println!("  {:<44} {:>5}  {}", output_name(snap, id), pct(c.volume), flag(c.mute, snap.active_outputs.contains(id)));
     }
     println!("INPUTS");
     for (key, row) in &s.inputs {
@@ -164,7 +188,7 @@ fn status(snap: &Snapshot) {
             .cells
             .iter()
             .filter(|(_, c)| c.on)
-            .map(|(id, c)| format!("{} {}", s.outputs.get(id).map_or(id.as_str(), |o| &o.name), pct(c.volume)))
+            .map(|(id, c)| format!("{} {}", output_name(snap, id), pct(c.volume)))
             .collect();
         let to = if cells.is_empty() { "(nowhere)".into() } else { cells.join(", ") };
         let active = snap.active_inputs.contains(key);
@@ -174,7 +198,7 @@ fn status(snap: &Snapshot) {
         .default_route
         .iter()
         .filter(|(_, c)| c.on)
-        .map(|(id, c)| format!("{} {}", s.outputs.get(id).map_or(id.as_str(), |o| &o.name), pct(c.volume)))
+        .map(|(id, c)| format!("{} {}", output_name(snap, id), pct(c.volume)))
         .collect();
     println!("NEW APPS -> {}", def.join(", "));
     let presets: Vec<&str> = s.presets.keys().map(String::as_str).collect();
@@ -208,7 +232,8 @@ mod tests {
         assert_eq!(pick("x", "id3", c()).unwrap(), "id3");
         assert!(pick("x", "nope", c()).is_err());
         assert!(pick("x", "P", c()).is_err(), "ambiguous");
-        assert_eq!(percent("30%").unwrap(), 0.3);
+        assert!((percent("50%").unwrap() - 0.25).abs() < 1e-6, "position 50% = gain 0.25");
+        assert_eq!(pct(0.25), "50%");
         assert!(percent("loud").is_err());
     }
 }

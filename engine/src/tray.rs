@@ -36,6 +36,7 @@ const TIMER: usize = 1;
 const CMD_MICS: usize = 1;
 const CMD_AUTOSTART: usize = 2;
 const CMD_QUIT: usize = 3;
+const CMD_OPEN: usize = 4;
 const CMD_PRESET: usize = 100; // + preset index
 
 thread_local! {
@@ -63,7 +64,7 @@ fn run() -> Res<()> {
         let wc = WNDCLASSW { lpfnWndProc: Some(wndproc), hInstance: hinst, lpszClassName: class, ..Default::default() };
         RegisterClassW(&wc);
         let hwnd = CreateWindowExW(
-            WINDOW_EX_STYLE(0), class, w!("Audiomeda"), WINDOW_STYLE(0), 0, 0, 0, 0, None, None, Some(hinst), None,
+            WINDOW_EX_STYLE(0), class, w!("Audiomeda tray"), WINDOW_STYLE(0), 0, 0, 0, 0, None, None, Some(hinst), None,
         )?;
         // explorer restarts broadcast this; the icon must be added again
         TASKBAR_CREATED.store(RegisterWindowMessageW(w!("TaskbarCreated")), Ordering::Relaxed);
@@ -81,8 +82,10 @@ fn run() -> Res<()> {
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_TRAY => {
-            if matches!(lp.0 as u32, WM_LBUTTONUP | WM_RBUTTONUP) {
-                show_menu(hwnd);
+            match lp.0 as u32 {
+                WM_LBUTTONUP => open_ui(hwnd),
+                WM_RBUTTONUP => show_menu(hwnd),
+                _ => {}
             }
         }
         WM_HOTKEY => {
@@ -122,7 +125,7 @@ fn tray_icon() -> HICON {
     unsafe {
         let Ok(hinst) = GetModuleHandleW(None) else { return HICON::default() };
         let (cx, cy) = (GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
-        LoadImageW(Some(hinst.into()), PCWSTR(2 as *const u16), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR)
+        LoadImageW(Some(hinst.into()), PCWSTR(std::ptr::without_provenance(2)) /* MAKEINTRESOURCE(2) */, IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR)
             .map(|h| HICON(h.0))
             .or_else(|_| LoadIconW(None, IDI_APPLICATION))
             .unwrap_or_default()
@@ -206,7 +209,8 @@ fn show_menu(hwnd: HWND) {
     let flag = |on: bool, f: MENU_ITEM_FLAGS| if on { f } else { MENU_ITEM_FLAGS(0) };
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
-        let _ = AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, w!("Audiomeda"));
+        let _ = AppendMenuW(menu, MF_STRING, CMD_OPEN, w!("Open mixer"));
+        let _ = SetMenuDefaultItem(menu, CMD_OPEN as u32, 0); // bold, like left-click
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         if presets.is_empty() {
             let _ = AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, w!("No presets yet (audiomeda preset save <name>)"));
@@ -238,6 +242,7 @@ fn show_menu(hwnd: HWND) {
                 }
             }
             CMD_QUIT => STOP.store(true, Ordering::Relaxed),
+            CMD_OPEN => open_ui(hwnd),
             n if n >= CMD_PRESET => {
                 if let Some(p) = presets.get(n - CMD_PRESET) {
                     run_action(hwnd, &format!("preset:{p}"), false);
@@ -245,6 +250,22 @@ fn show_menu(hwnd: HWND) {
             }
             _ => {}
         }
+    }
+}
+
+/// Brings the mixer window to the front, or starts `audiomeda-ui.exe` from next to this exe.
+fn open_ui(hwnd: HWND) {
+    unsafe {
+        if let Ok(win) = FindWindowW(PCWSTR::null(), w!("Audiomeda")) {
+            let _ = ShowWindow(win, SW_RESTORE);
+            let _ = SetForegroundWindow(win);
+            return;
+        }
+    }
+    let ui = std::env::current_exe().ok().and_then(|p| Some(p.parent()?.join("audiomeda-ui.exe")));
+    match ui.map(|p| std::process::Command::new(p).spawn()) {
+        Some(Ok(_)) => {}
+        _ => notify(hwnd, "Couldn't start the mixer: audiomeda-ui.exe isn't next to the engine"),
     }
 }
 

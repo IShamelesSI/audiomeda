@@ -20,10 +20,30 @@ pub struct State {
     /// Canonical combo ("ctrl+alt+m") -> action ("toggle_mics" or "preset:<name>").
     #[serde(default)]
     pub hotkeys: BTreeMap<String, String>,
+    /// User's custom name / color / pin, keyed by input key or output device id.
+    #[serde(default)]
+    pub labels: BTreeMap<String, Label>,
+    /// Last known exe path per app input key, so pinned apps keep their icon while closed.
+    /// Written by the engine only.
+    #[serde(default)]
+    pub app_paths: BTreeMap<String, String>,
 }
 
-/// A saved mix. Loading it replaces outputs and the default route, and overwrites the
-/// rows it has; apps it doesn't know keep their current row.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct Label {
+    /// Shown instead of the device/app name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// "#rrggbb".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Apps: stay visible while closed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+}
+
+/// A saved mix of levels. Loading it never adds or removes devices or apps: it only sets
+/// volumes, mutes and sends of the ones that exist now and that it knows.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Preset {
     pub outputs: BTreeMap<String, Column>,
@@ -49,6 +69,16 @@ pub struct Row {
 pub struct Cell {
     pub volume: f32,
     pub on: bool,
+}
+
+/// Faders and percentages show *position*; the state stores *gain*. gain = positionÂ²
+/// is an audio taper: 50% â‰ˆ -12 dB, which sounds about half as loud.
+pub fn gain_from_position(p: f32) -> f32 {
+    p * p
+}
+
+pub fn position_from_gain(g: f32) -> f32 {
+    g.max(0.0).sqrt()
 }
 
 pub fn app_key(exe: &str) -> String {
@@ -111,7 +141,7 @@ impl State {
         s
     }
 
-    /// Final gain of one input on one output: row × cell × column, 0 if anything is muted/off/missing.
+    /// Final gain of one input on one output: row Ã— cell Ã— column, 0 if anything is muted/off/missing.
     pub fn gain(&self, input: &str, output: &str) -> f32 {
         let (Some(row), Some(col)) = (self.inputs.get(input), self.outputs.get(output)) else {
             return 0.0;
@@ -240,14 +270,51 @@ impl State {
             }
             Request::LoadPreset { name } => {
                 let p = self.presets.get(name).cloned().ok_or_else(|| unknown("preset", name))?;
-                self.outputs = p.outputs;
-                self.default_route = p.default_route;
-                self.inputs.extend(p.inputs);
+                for (id, saved) in p.outputs {
+                    if let Some(c) = self.outputs.get_mut(&id) {
+                        c.volume = saved.volume;
+                        c.mute = saved.mute;
+                    }
+                }
+                let outputs = &self.outputs;
+                let copy_cells = |into: &mut BTreeMap<String, Cell>, from: BTreeMap<String, Cell>| {
+                    into.extend(from.into_iter().filter(|(o, _)| outputs.contains_key(o)));
+                };
+                copy_cells(&mut self.default_route, p.default_route);
+                for (key, saved) in p.inputs {
+                    if let Some(r) = self.inputs.get_mut(&key) {
+                        r.volume = saved.volume;
+                        r.mute = saved.mute;
+                        copy_cells(&mut r.cells, saved.cells);
+                    }
+                }
             }
             Request::DeletePreset { name } => {
                 self.presets.remove(name).ok_or_else(|| unknown("preset", name))?;
                 let action = format!("preset:{name}");
                 self.hotkeys.retain(|_, a| *a != action);
+            }
+            Request::SetLabel { key, label } => {
+                if !self.inputs.contains_key(key) && !self.outputs.contains_key(key) {
+                    return Err(unknown("input or output", key));
+                }
+                let name = label.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+                if name.is_some_and(|n| n.chars().count() > 40) {
+                    return Err("names can be at most 40 characters".into());
+                }
+                let color = label.color.as_deref();
+                if let Some(c) = color {
+                    let hex = c.strip_prefix('#').filter(|h| h.len() == 6 && h.chars().all(|ch| ch.is_ascii_hexdigit()));
+                    if hex.is_none() {
+                        return Err(format!("color {c:?} isn't like #a855f7"));
+                    }
+                }
+                let clean = Label { name: name.map(String::from), color: color.map(str::to_lowercase), pinned: label.pinned };
+                if clean == Label::default() {
+                    self.labels.remove(key);
+                } else {
+                    self.labels.insert(key.clone(), clean);
+                }
             }
             Request::SetHotkey { combo, action } => {
                 let (_, _, combo) = parse_hotkey(combo)?;
@@ -296,7 +363,7 @@ mod tests {
         row.cells.insert("vr".into(), Cell { volume: 0.6, on: true });
         assert!(!s.ensure_app("msedge.exe")); // seen again: edits kept
         assert!((s.gain("app:msedge.exe", "hp") - 0.3).abs() < 1e-6);
-        assert!((s.gain("app:msedge.exe", "vr") - 0.3).abs() < 1e-6); // 0.6 cell × 0.5 column
+        assert!((s.gain("app:msedge.exe", "vr") - 0.3).abs() < 1e-6); // 0.6 cell Ã— 0.5 column
     }
 
     #[test]
@@ -355,15 +422,22 @@ mod tests {
         s.apply(&Request::AddMic { id: "m".into() }, &none, &devs(&["m"])).unwrap();
         s.apply(&Request::SavePreset { name: "quiet".into() }, &none, &none).unwrap();
 
-        // change things, then load: rows in the preset come back, outputs replaced, new apps kept
+        // change things, then load: levels come back, but which devices exist doesn't change
         s.inputs.get_mut("app:a.exe").unwrap().volume = 0.2;
+        s.outputs.get_mut("hp").unwrap().volume = 0.3;
         s.outputs.remove("vr");
         s.ensure_app("new.exe");
+        s.apply(&Request::RemoveMic { id: "m".into() }, &none, &none).unwrap();
         s.apply(&Request::LoadPreset { name: "quiet".into() }, &none, &none).unwrap();
         assert_eq!(s.inputs["app:a.exe"].volume, 1.0);
-        assert!(s.outputs.contains_key("vr"));
+        assert_eq!(s.outputs["hp"].volume, 1.0);
+        assert!(!s.outputs.contains_key("vr"), "removed output stays removed");
+        assert!(!s.inputs["app:a.exe"].cells.contains_key("vr"), "no sends to missing outputs");
+        assert!(!s.default_route.contains_key("vr"));
+        assert!(!s.inputs.contains_key("mic:m"), "removed mic stays removed");
         assert!(s.inputs.contains_key("app:new.exe"));
 
+        s.apply(&Request::AddMic { id: "m".into() }, &none, &devs(&["m"])).unwrap();
         assert!(!s.mics_muted());
         s.apply(&Request::ToggleMics, &none, &none).unwrap();
         assert!(s.mics_muted());
@@ -380,6 +454,28 @@ mod tests {
 
         let mut empty = sample();
         assert!(empty.apply(&Request::ToggleMics, &none, &none).is_err());
+    }
+
+    #[test]
+    fn labels() {
+        let mut s = sample();
+        s.ensure_app("a.exe");
+        let none = Devices::new();
+        let set = |key: &str, name: Option<&str>, color: Option<&str>, pinned| Request::SetLabel {
+            key: key.into(),
+            label: Label { name: name.map(Into::into), color: color.map(Into::into), pinned },
+        };
+        s.apply(&set("hp", Some("  Cans "), Some("#EF4444"), false), &none, &none).unwrap();
+        assert_eq!(s.labels["hp"], Label { name: Some("Cans".into()), color: Some("#ef4444".into()), pinned: false });
+        s.apply(&set("app:a.exe", None, None, true), &none, &none).unwrap();
+        assert!(s.labels["app:a.exe"].pinned);
+
+        assert!(s.apply(&set("hp", None, Some("red"), false), &none, &none).is_err());
+        assert!(s.apply(&set("hp", Some(&"x".repeat(41)), None, false), &none, &none).is_err());
+        assert!(s.apply(&set("nope", Some("x"), None, false), &none, &none).is_err());
+
+        s.apply(&set("hp", Some("   "), None, false), &none, &none).unwrap();
+        assert!(!s.labels.contains_key("hp"), "an empty label is removed");
     }
 
     #[test]

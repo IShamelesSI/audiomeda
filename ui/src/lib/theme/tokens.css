@@ -1,0 +1,81 @@
+/* Design tokens: the only place colors, sizes and motion are defined.
+   Components read these variables and nothing else, so a new look = edit this file
+   (or swap it for another theme file). */
+:root {
+  /* type */
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 17px;
+  --text-xl: 22px;
+
+  /* window: translucent so Windows 11 Mica shows through */
+  --bg: rgba(10, 8, 20, 0.72);
+  --bg-glow-1: rgba(168, 85, 247, 0.16);
+  --bg-glow-2: rgba(96, 165, 250, 0.10);
+
+  /* surfaces */
+  --surface: rgba(255, 255, 255, 0.045);
+  --surface-hover: rgba(255, 255, 255, 0.07);
+  --surface-strong: rgba(255, 255, 255, 0.1);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  /* text */
+  --text: #eeebf8;
+  --text-dim: #a8a2bd;
+  --text-faint: #6f6987;
+
+  /* accents (from the logo: violet to sky blue) */
+  --accent-1: #c084fc;
+  --accent-2: #60a5fa;
+  --accent: #a78bfa;
+  --accent-grad: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  --accent-soft: rgba(167, 139, 250, 0.16);
+  --glow: 0 0 14px rgba(167, 139, 250, 0.55);
+  --danger: #fb7185;
+  --danger-soft: rgba(251, 113, 133, 0.16);
+  --ok: #4ade80;
+  --off: #57526c;
+
+  /* faders */
+  --track: rgba(255, 255, 255, 0.09);
+  --track-h: 6px;
+  --track-h-sm: 4px;
+  --thumb: #ffffff;
+  --thumb-size: 16px;
+  --thumb-size-sm: 12px;
+  --fill-muted: linear-gradient(90deg, #5b5670, #47435a);
+
+  /* shape */
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-hover: 0 14px 40px rgba(0, 0, 0, 0.45);
+  --card-min: 300px;
+
+  /* motion (also read by Svelte transitions via lib/theme/motion.ts) */
+  --dur-fast: 120ms;
+  --dur: 220ms;
+  --dur-slow: 420ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+  }
+}

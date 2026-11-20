@@ -185,6 +185,29 @@ fn run() -> Res<()> {
             apps.insert(exe.clone(), (root, Worker::spawn(exe, move |stop| audio::capture(key, Source::App(root), c, stop))));
         }
 
+        // shown in the mixer = has a window, or is making sound (e.g. Discord in the tray during a call)
+        let with_windows = win::exes_with_windows(&by_pid);
+        let sounding: HashSet<String> = win::playing_pids(&[])?
+            .into_iter()
+            .filter_map(|pid| by_pid.get(&pid).map(|e| e.to_string()))
+            .collect();
+        let playing_apps: Vec<String> = apps.keys().filter(|e| sounding.contains(*e)).map(|e| app_key(e)).collect();
+        let open_apps: Vec<String> = apps
+            .keys()
+            .filter(|e| sounding.contains(*e) || with_windows.contains(*e))
+            .map(|e| app_key(e))
+            .collect();
+        // remember exe paths so pinned apps keep their icon after closing (and across restarts)
+        for (exe, (pid, _)) in &apps {
+            if let Some(path) = win::exe_path(*pid) {
+                let mut s = state.lock().unwrap();
+                if s.app_paths.get(&app_key(exe)) != Some(&path) {
+                    s.app_paths.insert(app_key(exe), path);
+                    DIRTY.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+
         let managed: HashSet<u32> =
             procs.iter().filter(|p| apps.contains_key(&p.exe)).map(|p| p.pid).collect();
         match win::unity_on(&sink, &managed) {
@@ -243,6 +266,8 @@ fn run() -> Res<()> {
             active_inputs: inputs,
             renders,
             captures,
+            open_apps,
+            playing_apps,
         };
         if DIRTY.swap(false, Ordering::Relaxed) {
             let s = state.lock().unwrap().clone();

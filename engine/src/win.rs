@@ -172,6 +172,48 @@ pub fn unity_on(device_id: &str, pids: &HashSet<u32>) -> Res<usize> {
     Ok(changed)
 }
 
+/// Exe names (lowercase) that own a visible top-level window, i.e. what the user sees as "open".
+pub fn exes_with_windows(by_pid: &HashMap<u32, &str>) -> HashSet<String> {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GW_OWNER, GetWindow, GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible,
+    };
+    use windows_core::BOOL;
+
+    unsafe extern "system" fn each(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let pids = unsafe { &mut *(lp.0 as *mut Vec<u32>) };
+        unsafe {
+            // shortcut: visible + unowned + titled; cloaked (suspended UWP) windows still count
+            if IsWindowVisible(hwnd).as_bool() && GetWindow(hwnd, GW_OWNER).is_err() && GetWindowTextLengthW(hwnd) > 0 {
+                let mut pid = 0;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                pids.push(pid);
+            }
+        }
+        BOOL(1)
+    }
+
+    let mut pids: Vec<u32> = Vec::new();
+    let _ = unsafe { EnumWindows(Some(each), LPARAM(&mut pids as *mut _ as isize)) };
+    pids.iter().filter_map(|p| by_pid.get(p).map(|e| e.to_string())).collect()
+}
+
+/// Full path of a process's exe, if we're allowed to ask.
+pub fn exe_path(pid: u32) -> Option<String> {
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    };
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let r = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows_core::PWSTR(buf.as_mut_ptr()), &mut len);
+        let _ = CloseHandle(h);
+        r.ok()?;
+        Some(String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+
 pub fn exe_by_pid(procs: &[Proc]) -> HashMap<u32, &str> {
     procs.iter().map(|p| (p.pid, p.exe.as_str())).collect()
 }

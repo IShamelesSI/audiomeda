@@ -1,3 +1,3 @@
 [workspace]
-members = ["protocol", "engine", "cli"]
+members = ["protocol", "engine", "cli", "ui/src-tauri"]
 resolver = "2"

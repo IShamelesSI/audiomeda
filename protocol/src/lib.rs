@@ -37,6 +37,8 @@ pub enum Request {
     DeletePreset { name: String },
     /// `action` is "toggle_mics" or "preset:<name>"; `None` removes the hotkey.
     SetHotkey { combo: String, action: Option<String> },
+    /// Replaces the custom name/color/pin of an input or output. An empty label removes it.
+    SetLabel { key: String, label: Label },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -56,6 +58,10 @@ pub struct Snapshot {
     /// Inputs being captured and outputs being rendered right now.
     pub active_inputs: Vec<String>,
     pub active_outputs: Vec<String>,
+    /// App inputs that have a visible window or are playing sound: what the mixer shows.
+    pub open_apps: Vec<String>,
+    /// App inputs making sound right now.
+    pub playing_apps: Vec<String>,
 }
 
 /// Blocking client: one request, one response.

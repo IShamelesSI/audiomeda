@@ -122,9 +122,10 @@ The throwaway spike CLI is deleted; its working code lives on in `engine/`.
   gracefully, returning apps to their normal output.
 - Tray actions and hotkeys go through the same request handler as the
   pipe, so the validation and saving are shared.
-- **Presets** (`state.presets`): a snapshot of outputs, input rows and the
-  default route. Loading one replaces outputs and the default route and
-  overwrites the rows it has; apps it doesn't know keep their row.
+- **Presets** (`state.presets`): a snapshot of levels (output masters, input
+  rows, default route). Loading one never adds or removes outputs, apps or
+  mics: it only sets volume, mute and sends for devices that exist now and
+  that the preset knows. Everything else keeps its current settings.
 - **Hotkeys** (`state.hotkeys`: combo → `toggle_mics` | `preset:<name>`).
   A modifier is required. They're re-registered when the list changes; a
   combo taken by another app shows a toast. Deleting a preset removes its
@@ -133,12 +134,69 @@ The throwaway spike CLI is deleted; its working code lives on in `engine/`.
 - Start with Windows = per-user `HKCU\...\Run` value "Audiomeda" pointing
   at the exe. Off by default; toggled from the tray.
 - Icons: `assets/source/` holds the originals (app image, pink tray image).
-  `assets/make_icons.py` turns them into `app.ico` / `tray.ico` (cleans
-  faint alpha noise, crops square, multi-size) plus 256 px previews.
+  `assets/make_icons.py` builds every icon from them: `app.ico` / `tray.ico`
+  (cleans faint alpha noise, crops square, multi-size) with full-size PNGs,
+  the UI window icons in `ui/src-tauri/icons/` and the header logo
+  `ui/static/logo.png`.
   `engine/build.rs` embeds both (app = exe icon, tray = resource 2) and a
   per-monitor DPI-aware manifest so the tray icon stays sharp.
-- Not in yet: "Open mixer" (no UI yet), log file for when it starts at
-  login.
+- Left-click on the tray icon (or the bold "Open mixer" item in the menu)
+  opens the mixer: it brings the existing "Audiomeda" window forward, or
+  starts `audiomeda-ui.exe` from next to the engine exe.
+- Not in yet: log file for when it starts at login.
+
+## Mixer UI (2026-11-20)
+- `ui/`: Tauri 2 + SvelteKit (SPA, static adapter) + Svelte 5. Dark window
+  with Mica showing through (`transparent` + `windowEffects: mica`).
+- `ui/src-tauri/src/lib.rs`: `call(request)` goes to the engine over the
+  pipe (reconnects once if the engine restarted); `app_icon(path)` returns an
+  exe's icon as a PNG data URL (`icon.rs`, `SHDefExtractIconW`). The mix lives
+  only in the engine.
+- `ui/src/lib/api/engine.svelte.ts` is the only code that talks to the
+  engine: it polls `snapshot` every 300 ms (shortcut until the engine pushes
+  changes) and sends changes. While a fader is dragged, only the newest value
+  per target is sent. `types.ts` mirrors the protocol by hand.
+- Skinnable: every color, size and timing is in
+  `ui/src/lib/theme/tokens.css` (Svelte transitions read their durations
+  from it too; reduced motion zeroes them). Components in
+  `ui/src/lib/components/` are thin and style only with tokens. Re-skin =
+  tokens and/or `.svelte` views; `lib/api` stays untouched.
+- Faders show position %; gain = position² (audio taper), same curve in the
+  CLI via `protocol::gain_from_position`.
+- Main view: two columns with a draggable divider (25–75%, double-click
+  resets, arrow keys move it). Left: **Outputs** (physical) and **Apps**.
+  Right: **Input devices** (mics) and **Virtual outputs** (cables, matched by
+  name: cable / vb-audio / virtual / voicemeeter ...). Each column fills the
+  window height and scrolls on its own; all card grids share one minimum
+  width (`--card-min`), so they reflow at the same widths.
+- Input cards: master, mute, pin (apps), rename/recolor (mics), and one send
+  per output (on/off pill + level) in the same order as the output cards,
+  physical first, then virtual.
+- Apps come and go: the engine reports `open_apps` (a visible, unowned,
+  titled top-level window) and `playing_apps` (an active session). An app
+  shows while open or playing, or always when pinned.
+- Labels (`state.labels`, key = app/mic key or output id): custom name,
+  color, pinned. Shown as "Custom (Windows name)" on the device's own card,
+  just "Custom" everywhere else. Saved by the engine, so they survive a
+  reboot. The engine also records each app's exe path (`state.app_paths`)
+  so closed pinned apps keep their real icon.
+- Cards drag to reorder within their section (grab any spot that isn't a
+  control; the column auto-scrolls near its edges). Order and divider width
+  are window preferences in `localStorage` (WebView2 keeps it across
+  reboots), not engine state.
+- Small buttons are outlined and glow on hover; their icon pops on click;
+  mute turns red, pin turns violet while engaged.
+- Presets as chips in the header. A toast shows engine errors; a banner shows
+  when the engine is unreachable. A `svelte:boundary` in `+layout.svelte`
+  shows the error and a "Try again" button instead of a blank window if a
+  render crashes (Svelte 5 forbids writing `$state` during render; that
+  caused one blank window).
+- `/playground` (linked in dev builds): every component in every state with
+  fake data.
+- Build: dev `cd ui && npm run tauri dev`; release `npx tauri build --no-bundle`
+  puts `target/release/audiomeda-ui.exe` next to the engine.
+- Not in yet: level meters (needs engine metering + a stream), matrix view,
+  engine push instead of polling, single-instance UI.
 
 ## Repo layout
 Rust workspace:
@@ -149,13 +207,20 @@ Rust workspace:
   `state.rs` load/save, `win.rs` Windows plumbing.
 - `cli/`: `audiomeda` command-line remote.
 - `assets/`: app and tray icons, their sources, and the script that builds them.
-- Later: `ui/` (Tauri + Svelte).
+- `ui/`: mixer window (Tauri + Svelte); Rust bridge in `ui/src-tauri/`.
+  - `src/lib/api/`: the only code that talks to the engine (`engine.svelte.ts`),
+    protocol types, display-name helpers.
+  - `src/lib/components/`: cards, faders, buttons, menus.
+  - `src/lib/actions/`: Svelte actions (drag to reorder).
+  - `src/lib/theme/`: design tokens, global CSS, motion helper.
+  - `src/routes/`: the mixer page and `/playground`.
 
 ## Build order
 1. ✅ Spike: all 4 risky questions answered (results above).
 2. ✅ Engine core: headless matrix mixer, JSON state, hot-plug.
 3. ✅ Named pipe API + tiny CLI client.
 4. ✅ Tray, presets, hotkeys (usable daily without UI).
-5. Tauri + Svelte UI: stores/API, tokens, playground, cards view.
+5. ✅ Tauri + Svelte UI: API layer, tokens, playground, cards view, labels,
+   pins, real icons, two-column layout, drag to reorder.
 6. Matrix view, mic noise gate.
 7. Later features.

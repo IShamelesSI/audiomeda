@@ -1,1 +1,3 @@
 /target
+# local preview config for Claude Code
+/.claude/

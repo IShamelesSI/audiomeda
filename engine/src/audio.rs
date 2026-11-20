@@ -84,8 +84,10 @@ pub fn capture(key: String, src: Source, conns: Conns, stop: &AtomicBool) -> Res
             buf.resize(frames as usize * CH * 4, 0);
             let (got, _) = cc.read_from_device(&mut buf)?;
             let samples = buf[..got as usize * CH * 4]
-                .chunks_exact(4)
-                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b));
             let mut conns = conns.lock().unwrap();
             for (_, q) in conns.iter_mut().filter(|((i, _), _)| *i == key) {
                 q.extend(samples.clone());
