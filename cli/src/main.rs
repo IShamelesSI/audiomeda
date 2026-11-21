@@ -12,6 +12,7 @@ const USAGE: &str = "usage:
   audiomeda default <output> <percent>          route for newly seen apps
   audiomeda reset <input>                       back to the default route
   audiomeda output add|remove <device>
+  audiomeda sink <device>               the silent cable apps play into
   audiomeda mic add|remove <device>
   audiomeda mics toggle                         mute/unmute all mics
   audiomeda preset save|load|delete <name>
@@ -70,6 +71,7 @@ fn run() -> Result<(), String> {
         }
         ["reset", inp] => Request::ResetInput { key: input(&snap, inp)? },
         ["output", "add", dev] => Request::AddOutput { id: pick("output device", dev, snap.renders.iter().map(|(k, v)| (k.as_str(), v.clone())))? },
+        ["sink", dev] => Request::SetSink { id: pick("output device", dev, snap.renders.iter().map(|(k, v)| (k.as_str(), v.clone())))? },
         ["output", "remove", out] => Request::RemoveOutput { id: output(&snap, out)? },
         ["mic", "add", dev] => Request::AddMic { id: pick("input device", dev, snap.captures.iter().map(|(k, v)| (k.as_str(), v.clone())))? },
         ["mic", "remove", inp] => {

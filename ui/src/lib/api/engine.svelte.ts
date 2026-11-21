@@ -104,4 +104,5 @@ export const actions = {
   loadPreset: (name: string) => send(`load:${name}`, { op: "load_preset", name }),
   deletePreset: (name: string) => send(`del:${name}`, { op: "delete_preset", name }),
   setLabel: (key: string, label: Label) => send(`label:${key}`, { op: "set_label", key, label }),
+  setSink: (id: string) => send("sink", { op: "set_sink", id }),
 };

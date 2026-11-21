@@ -80,6 +80,12 @@
     snap
       ? addable(snap.renders, (id) => id === snap.state.sink || id in snap.state.outputs || isVirtual(snap.renders[id]) !== virtual)
       : [];
+  // any virtual device that isn't an output can be the sink
+  const sinkChoices = $derived(
+    snap
+      ? addable(snap.renders, (id) => id === snap.state.sink || id in snap.state.outputs || !isVirtual(snap.renders[id]))
+      : [],
+  );
   const addableMics = $derived(snap ? addable(snap.captures, (id) => `mic:${id}` in snap.state.inputs) : []);
 
   const setLabel = (key: string, current: Label | undefined, change: Label) => actions.setLabel(key, { ...current, ...change });
@@ -177,6 +183,14 @@
     {#if import.meta.env.DEV}<a class="dev" href="/playground">Playground</a>{/if}
     <div class="spacer"></div>
     {#if snap}
+      <AddMenu
+        icon="output"
+        label="Sink: {shortDevice(snap.renders[snap.state.sink] ?? 'missing')}"
+        title="The silent cable apps play into, so the mixer can take them over. Pick one nobody listens to."
+        empty="No other free virtual device"
+        choices={sinkChoices}
+        onpick={actions.setSink}
+      />
       <PresetBar
         presets={Object.keys(snap.state.presets)}
         onload={actions.loadPreset}

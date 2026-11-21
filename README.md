@@ -7,7 +7,10 @@ decisions are in [DESIGN.md](DESIGN.md).
 ## Requirements
 - Windows 11
 - Rust (stable, MSVC)
-- VB-Cable, A+B and C+D installed. "CABLE-D Input" is the silent sink.
+- VB-Cable, A+B and C+D installed. "CABLE-C Input" is the silent sink by
+  default; change it with **Sink** in the Virtual outputs header or
+  `audiomeda sink <device>`. Keep Windows' default output on your headphones:
+  system sounds (notifications) can't be taken over and are lost in the sink.
 
 ## Run
 ```
@@ -28,6 +31,7 @@ match by any part, e.g. `opera` or `hyperx`.
 audiomeda status                      see the whole matrix
 audiomeda devices                     list devices you can add
 audiomeda output add VG271            add an output
+audiomeda sink "CABLE-C Input (VB"    choose the silent sink cable
 audiomeda vol opera hyperx 30         Opera at 30% on the headphones
 audiomeda vol opera 50                Opera's master volume
 audiomeda mute discord on

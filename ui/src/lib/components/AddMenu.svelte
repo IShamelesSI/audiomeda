@@ -1,14 +1,25 @@
 <script lang="ts">
-  // "+ Add …" button with a popover list of choices.
+  // "+ Add …" button (or any icon + label) with a popover list of choices.
   import { scale } from "svelte/transition";
   import { ms } from "$lib/theme/motion";
+  import type { ComponentProps } from "svelte";
   import Icon from "./Icon.svelte";
 
   let {
     label,
     choices,
     onpick,
-  }: { label: string; choices: { id: string; name: string }[]; onpick: (id: string) => void } = $props();
+    icon = "plus",
+    title,
+    empty = "Nothing else to add",
+  }: {
+    label: string;
+    choices: { id: string; name: string }[];
+    onpick: (id: string) => void;
+    icon?: ComponentProps<typeof Icon>["name"];
+    title?: string;
+    empty?: string;
+  } = $props();
 
   let open = $state(false);
 
@@ -21,8 +32,8 @@
 <svelte:window onkeydown={(e) => e.key === "Escape" && (open = false)} />
 
 <div class="wrap">
-  <button class="add" aria-expanded={open} onclick={() => (open = !open)}>
-    <Icon name="plus" size={14} />{label}
+  <button class="add" aria-expanded={open} {title} onclick={() => (open = !open)}>
+    <Icon name={icon} size={14} />{label}
   </button>
   {#if open}
     <!-- click outside closes -->
@@ -31,7 +42,7 @@
       {#each choices as c (c.id)}
         <li><button onclick={() => pick(c.id)}>{c.name}</button></li>
       {:else}
-        <li class="empty">Nothing else to add</li>
+        <li class="empty">{empty}</li>
       {/each}
     </ul>
   {/if}

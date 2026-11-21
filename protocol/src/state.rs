@@ -237,6 +237,13 @@ impl State {
                 }
                 self.default_route.remove(id);
             }
+            Request::SetSink { id } => {
+                if self.outputs.contains_key(id) {
+                    return Err("that device is an output; remove it first to use it as the sink".into());
+                }
+                renders.get(id).ok_or_else(|| unknown("output device", id))?;
+                self.sink = id.clone();
+            }
             Request::AddMic { id } => {
                 if !captures.contains_key(id) {
                     return Err(unknown("input device", id));
@@ -497,5 +504,11 @@ mod tests {
         s.apply(&Request::RemoveOutput { id: "hp".into() }, &renders, &captures).unwrap();
         assert!(!s.inputs["app:a.exe"].cells.contains_key("hp"));
         assert!(!s.default_route.contains_key("hp"));
+
+        assert!(s.apply(&Request::SetSink { id: "tv".into() }, &renders, &captures).is_err(), "outputs can't be the sink");
+        assert!(s.apply(&Request::SetSink { id: "gone".into() }, &renders, &captures).is_err());
+        s.apply(&Request::RemoveOutput { id: "tv".into() }, &renders, &captures).unwrap();
+        s.apply(&Request::SetSink { id: "tv".into() }, &renders, &captures).unwrap();
+        assert_eq!(s.sink, "tv");
     }
 }

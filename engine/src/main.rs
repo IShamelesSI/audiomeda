@@ -54,12 +54,13 @@ fn main() {
 
 fn first_run_state() -> Res<State> {
     let renders = win::devices(Direction::Render)?;
-    // VB-Cable D is the sink on this setup; change "sink" in state.json for another device
+    // VB-Cable C by default (Discord stuttered into cable D during screen share); changeable in
+    // the mixer. Matched with its driver name: other virtual devices may be renamed "CABLE-C Input".
     let sink = renders
         .iter()
-        .find(|(_, name)| name.contains("CABLE-D Input"))
+        .find(|(_, name)| name.starts_with("CABLE-C Input (VB-Audio"))
         .map(|(id, _)| id.clone())
-        .ok_or("no \"CABLE-D Input\" device for the sink; install VB-Cable C+D or edit state.json")?;
+        .ok_or("no \"CABLE-C Input (VB-Audio ...)\" device for the sink; install VB-Cable C+D or edit state.json")?;
     let (primary, name) = win::default_render()?;
     if primary == sink {
         return Err("the Windows default output is the sink cable; pick your headphones as default first".into());
@@ -92,7 +93,6 @@ fn run() -> Res<()> {
         }
         return Ok(());
     }
-    let sink = state.sink.clone();
     let state = Arc::new(Mutex::new(state));
     // what clients see besides the state; refreshed every tick
     let live: Arc<Mutex<Snapshot>> = Default::default();
@@ -129,10 +129,13 @@ fn run() -> Res<()> {
     let mut apps: HashMap<String, (u32, Worker)> = HashMap::new(); // exe -> (root pid, capture)
     let mut mics: HashMap<String, Worker> = HashMap::new(); // input key -> capture
     let mut outs: HashMap<String, Worker> = HashMap::new(); // device id -> render
+    let mut routed_to = String::new(); // the sink running apps were last moved to
 
     // shortcut: polls every 500 ms instead of device/session notifications; switch if the
     // half-second delay before a new app is heard ever matters.
     while !STOP.load(Ordering::Relaxed) {
+        // read every tick, so a sink change from the mixer applies live
+        let sink = state.lock().unwrap().sink.clone();
         let procs = win::processes()?;
         let renders = win::devices(Direction::Render)?;
         let captures = win::devices(Direction::Capture)?;
@@ -144,10 +147,19 @@ fn run() -> Res<()> {
             .filter(|&pid| pid != 0 && pid != own_pid)
             .filter_map(|pid| by_pid.get(&pid).map(|e| e.to_string()))
             .collect();
-        for exe in &playing {
+        // apps making sound on any device, the sink included (e.g. started while the sink is
+        // Windows' default, so they never played anywhere else)
+        let sounding: HashSet<String> = win::playing_pids(&[])?
+            .into_iter()
+            .filter(|&pid| pid != 0 && pid != own_pid)
+            .filter_map(|pid| by_pid.get(&pid).map(|e| e.to_string()))
+            .collect();
+        for exe in &sounding {
             if state.lock().unwrap().ensure_app(exe) {
                 DIRTY.store(true, Ordering::Relaxed);
             }
+        }
+        for exe in &playing {
             // re-sent every tick until the app actually moves (some only move when playback restarts)
             let r = win::route(&procs, exe, Some(&sink));
             if !apps.contains_key(exe) {
@@ -156,6 +168,17 @@ fn run() -> Res<()> {
                     Err(e) => println!("can't route {exe}, it will be heard twice: {e}"),
                 }
             }
+        }
+
+        // sink changed: move every managed app, silent ones too (playing ones are caught above)
+        if sink != routed_to {
+            if !routed_to.is_empty() {
+                println!("sink changed, moving {} app(s)", apps.len());
+            }
+            for exe in apps.keys() {
+                let _ = win::route(&procs, exe, Some(&sink));
+            }
+            routed_to = sink.clone();
         }
 
         // every known app that is running gets a capture (restarted if it died or the app restarted)
@@ -187,10 +210,6 @@ fn run() -> Res<()> {
 
         // shown in the mixer = has a window, or is making sound (e.g. Discord in the tray during a call)
         let with_windows = win::exes_with_windows(&by_pid);
-        let sounding: HashSet<String> = win::playing_pids(&[])?
-            .into_iter()
-            .filter_map(|pid| by_pid.get(&pid).map(|e| e.to_string()))
-            .collect();
         let playing_apps: Vec<String> = apps.keys().filter(|e| sounding.contains(*e)).map(|e| app_key(e)).collect();
         let open_apps: Vec<String> = apps
             .keys()

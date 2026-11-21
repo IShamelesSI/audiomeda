@@ -15,7 +15,9 @@ sent to virtual mics (e.g. mic + browser → Discord for singing).
   (`AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK`, include process tree).
   The sink exists only so the original isn't heard twice. It's required:
   muting the app instead also silences the capture (spike step 2).
-- **Virtual devices**: VB-Cable + A+B + C+D (5 cables): 1 sink (cable D),
+- **Virtual devices**: VB-Cable + A+B + C+D (5 cables): 1 sink (cable C by
+  default, switchable live with `set_sink`; Discord stuttered into cable D
+  during screen share but not into C),
   3 virtual mics (Discord, game voice chat, OBS), 1 spare. Engine picks devices by ID; which
   cable plays which role is config. No own driver (test-signing breaks
   anti-cheat games and needs Secure Boot off).
@@ -92,7 +94,14 @@ The throwaway spike CLI is deleted; its working code lives on in `engine/`.
 - Ctrl+C returns apps to their normal output. After a crash or kill, run
   `audiomeda-engine reset`, or apps stay silent (routed to the sink).
 - Changes go through the named pipe (below). `state.json` is read only at
-  startup, so hand edits need the engine stopped (e.g. to change the sink).
+  startup, so hand edits need the engine stopped.
+- The sink is re-read every tick: after `set_sink`, apps still on the old
+  sink count as playing elsewhere and are moved to the new one.
+- Apps already playing into the sink (e.g. started while the sink was
+  Windows' default) are picked up too, so they're never silent.
+- When an app runs as sibling process trees under a launcher whose children
+  are all that app (League: six LeagueClientUxRender under LeagueClientUx),
+  the launcher's tree is captured; otherwise the app's topmost process.
 - Known shortcuts (marked `shortcut:` in code): polling instead of
   notifications, one lock for all queues, drift fixed by trimming queues,
   ~22 ms shared-mode output buffer (IAudioClient3 low latency still to do).

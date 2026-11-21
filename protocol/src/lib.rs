@@ -28,6 +28,8 @@ pub enum Request {
     ResetInput { key: String },
     AddOutput { id: String },
     RemoveOutput { id: String },
+    /// The silent cable managed apps play into (the engine captures them from there).
+    SetSink { id: String },
     AddMic { id: String },
     RemoveMic { id: String },
     /// Mutes all mics, or unmutes them all if they're all muted already.

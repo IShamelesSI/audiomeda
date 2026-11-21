@@ -60,6 +60,7 @@ export type Request =
   | { op: "load_preset"; name: string }
   | { op: "delete_preset"; name: string }
   | { op: "set_hotkey"; combo: string; action: string | null }
-  | { op: "set_label"; key: string; label: Label };
+  | { op: "set_label"; key: string; label: Label }
+  | { op: "set_sink"; id: string };
 
 export type Response = ({ type: "snapshot" } & Snapshot) | { type: "ok" } | { type: "error"; message: string };
