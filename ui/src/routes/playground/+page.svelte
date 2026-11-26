@@ -16,7 +16,7 @@
 
   const outputs = [
     { id: "hp", name: "Cans", color: "#ef4444", virtual: false },
-    { id: "vr", name: "Quest headset", virtual: false },
+    { id: "vr", name: "VR headset", virtual: false },
     { id: "mic-a", name: "Discord mic", color: "#10b981", virtual: true },
   ];
   let pinned = $state(true);
@@ -28,8 +28,8 @@
     mic: row(1, false, { "mic-a": { volume: 1, on: true } }),
   });
   let cols = $state<Record<string, Column>>({
-    hp: { name: "Speakers (HyperX Quadcast)", volume: 1, mute: false },
-    vr: { name: "Quest headset", volume: 0.5, mute: true },
+    hp: { name: "Speakers (USB Headset)", volume: 1, mute: false },
+    vr: { name: "VR headset", volume: 0.5, mute: true },
   });
 
   const handlers = (k: string) => ({
@@ -63,7 +63,7 @@
       <IconButton icon={mute ? "speaker-off" : "speaker"} label="Mute" active={mute} pressed={mute} onclick={() => (mute = !mute)} />
       <IconButton icon="x" label="Remove" danger onclick={() => {}} />
       <IconButton icon="reset" label="Reset" onclick={() => {}} />
-      <AddMenu label="Add output" choices={[{ id: "a", name: "VG271 P" }, { id: "b", name: "CABLE-B Input" }]} onpick={() => {}} />
+      <AddMenu label="Add output" choices={[{ id: "a", name: "Monitor" }, { id: "b", name: "CABLE-B Input" }]} onpick={() => {}} />
       <AddMenu label="Add mic" choices={[]} onpick={() => {}} />
       <button class="demo" onclick={() => (toasts = [...toasts, { id: Date.now(), text: "That device is the sink; it can't also be an output" }])}>
         Show toast
@@ -84,9 +84,9 @@
   <section>
     <h2>Outputs</h2>
     <div class="row">
-      <OutputCard name="Cans (HyperX Quadcast)" original="HyperX Quadcast" color="#ef4444" label={{ name: "Cans", color: "#ef4444" }} live column={cols.hp} onvolume={(g) => (cols.hp.volume = g)} onmute={(m) => (cols.hp.mute = m)} onlabel={() => {}} onremove={() => {}} />
-      <OutputCard name="Quest headset (muted)" original="Quest headset" live column={cols.vr} onvolume={(g) => (cols.vr.volume = g)} onmute={(m) => (cols.vr.mute = m)} onlabel={() => {}} onremove={() => {}} />
-      <OutputCard name="VG271 P" original="VG271 P" color="#a855f7" live={false} column={cols.hp} onvolume={() => {}} onmute={() => {}} onlabel={() => {}} onremove={() => {}} />
+      <OutputCard name="Cans (USB Headset)" original="USB Headset" color="#ef4444" label={{ name: "Cans", color: "#ef4444" }} live column={cols.hp} onvolume={(g) => (cols.hp.volume = g)} onmute={(m) => (cols.hp.mute = m)} onlabel={() => {}} onremove={() => {}} />
+      <OutputCard name="VR headset (muted)" original="VR headset" live column={cols.vr} onvolume={(g) => (cols.vr.volume = g)} onmute={(m) => (cols.vr.mute = m)} onlabel={() => {}} onremove={() => {}} />
+      <OutputCard name="Monitor" original="Monitor" color="#a855f7" live={false} column={cols.hp} onvolume={() => {}} onmute={() => {}} onlabel={() => {}} onremove={() => {}} />
     </div>
   </section>
 
@@ -96,7 +96,7 @@
       <InputCard name="Opera (playing)" kind="app" status="playing" row={rows.live} {outputs} {...handlers("live")} onlabel={undefined} onpin={() => {}} />
       <InputCard name="Discord (muted)" kind="app" status="open" row={rows.muted} {outputs} {...handlers("muted")} onlabel={undefined} onpin={() => {}} />
       <InputCard name="Spotify (pinned, closed)" kind="app" status="closed" {pinned} row={rows.offline} {outputs} {...handlers("offline")} onlabel={undefined} onpin={(p) => (pinned = p)} />
-      <InputCard name="Studio mic" original="HyperX Quadcast" kind="mic" status="playing" color="#f97316" row={rows.mic} {outputs} {...handlers("mic")} onremove={() => {}} />
+      <InputCard name="Studio mic" original="USB Headset" kind="mic" status="playing" color="#f97316" row={rows.mic} {outputs} {...handlers("mic")} onremove={() => {}} />
     </div>
   </section>
 

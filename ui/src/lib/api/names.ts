@@ -15,18 +15,19 @@ const KNOWN: Record<string, string> = {
   obs64: "OBS",
 };
 
-/** "Speakers (HyperX Quadcast)" -> "HyperX Quadcast"; drops generic driver names in brackets. */
+/** "Speakers (USB Headset)" -> "USB Headset"; drops generic driver names in brackets. */
 export function shortDevice(name: string): string {
   const inner = name.match(/\(([^)]+)\)\s*$/)?.[1];
-  if (!inner || /high definition audio|virtual audio|vb-audio|voicemeeter/i.test(inner)) {
+  if (!inner || /high definition audio|vb-audio|voicemeeter/i.test(inner)) {
     return name.replace(/\s*\([^)]*\)\s*$/, "");
   }
   return inner;
 }
 
-/** Virtual cables and similar software devices (by their Windows name). */
+/** Virtual cables and similar software devices, by driver: endpoint names can be renamed
+ *  (a VR headset's endpoint can be named like a cable, e.g. "CABLE-C Input (... Virtual Audio Device)"). */
 export function isVirtual(deviceName: string): boolean {
-  return /cable|vb-audio|virtual|voicemeeter|voicemod|steam streaming/i.test(deviceName);
+  return /vb-audio|voicemeeter|voicemod|steam streaming/i.test(deviceName);
 }
 
 function original(key: string, snap: Snapshot): string {

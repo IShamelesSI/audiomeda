@@ -1,5 +1,10 @@
 # Audiomeda
 
+> **Work in progress.** Audiomeda is an early personal project and changes
+> often. No license is provided yet, so all rights are reserved for now: you're
+> welcome to read the code, but not to copy, modify or redistribute it. A
+> license will be added once the project is ready.
+
 A per-app audio mixer for Windows 11. Each app can play on every output at its
 own volume, and mic + app mixes go out through virtual mics. Design and
 decisions are in [DESIGN.md](DESIGN.md).
@@ -26,16 +31,16 @@ default output as the only output.
 
 ## Control it
 While the engine runs, `target\release\audiomeda.exe` changes the mix. Names
-match by any part, e.g. `opera` or `hyperx`.
+match by any part, e.g. `opera` or `headset`.
 ```
 audiomeda status                      see the whole matrix
 audiomeda devices                     list devices you can add
-audiomeda output add VG271            add an output
+audiomeda output add Monitor          add an output
 audiomeda sink "CABLE-C Input (VB"    choose the silent sink cable
-audiomeda vol opera hyperx 30         Opera at 30% on the headphones
+audiomeda vol opera headset 30        Opera at 30% on the headphones
 audiomeda vol opera 50                Opera's master volume
 audiomeda mute discord on
-audiomeda mic add "Microphone (HyperX"
+audiomeda mic add "Microphone (USB"
 audiomeda output add "CABLE-A Input"  virtual mic for Discord
 audiomeda vol "mic Microphone" "CABLE-A Input" 100
 audiomeda preset save Gaming          snapshot the current mix

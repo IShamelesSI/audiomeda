@@ -1,3 +1,11 @@
 /target
-# local preview config for Claude Code
+
+# Personal data: never commit these. The engine keeps its state (device names and ids,
+# app list, presets, labels) in %APPDATA%\Audiomeda\state.json; copies of it, logs and
+# local AI-assistant config/memory stay out of the repo too.
+state.json
+*.state.json
+*.log
 /.claude/
+CLAUDE.local.md
+/graphify-out/

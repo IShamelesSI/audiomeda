@@ -84,7 +84,7 @@ The throwaway spike CLI is deleted; its working code lives on in `engine/`.
   restarts.
 - One render thread per configured output that is present. Unplugging stops
   it (logged as "output disconnected") and reconnecting restarts it, with
-  settings kept. Tested by unplugging the HyperX.
+  settings kept. Tested by unplugging a USB headset.
 - Mic rows are state keys `mic:<capture device id>`. Volumes are stored
   linear 0–1 (the UI will map faders through a dB curve).
 - **Finding:** loopback capture is *post* the app's Windows session volume,

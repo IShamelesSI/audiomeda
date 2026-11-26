@@ -229,11 +229,11 @@ mod tests {
 
     #[test]
     fn pick_matches_id_or_unique_name() {
-        let c = || [("id1", "Speakers (HyperX)".to_string()), ("id2", "VG271 P".to_string()), ("id3", "PL2788H".to_string())].into_iter();
-        assert_eq!(pick("x", "hyperx", c()).unwrap(), "id1");
+        let c = || [("id1", "Speakers (USB Headset)".to_string()), ("id2", "Monitor A".to_string()), ("id3", "Monitor B".to_string())].into_iter();
+        assert_eq!(pick("x", "headset", c()).unwrap(), "id1");
         assert_eq!(pick("x", "id3", c()).unwrap(), "id3");
         assert!(pick("x", "nope", c()).is_err());
-        assert!(pick("x", "P", c()).is_err(), "ambiguous");
+        assert!(pick("x", "monitor", c()).is_err(), "ambiguous");
         assert!((percent("50%").unwrap() - 0.25).abs() < 1e-6, "position 50% = gain 0.25");
         assert_eq!(pct(0.25), "50%");
         assert!(percent("loud").is_err());
